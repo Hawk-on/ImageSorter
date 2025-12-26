@@ -1,0 +1,15 @@
+{
+    "identifier": "main-capability",
+    "description": "Main window capabilities",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "dialog:default",
+        "dialog:allow-open",
+        "opener:default",
+        "fs:allow-read-file",
+        "fs:read-all"
+    ]
+}
