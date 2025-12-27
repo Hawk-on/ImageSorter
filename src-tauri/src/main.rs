@@ -12,7 +12,8 @@ fn main() {
             commands::folder::scan_folder,
             commands::folder::find_duplicates,
             commands::folder::get_thumbnail,
-            commands::folder::open_image
+            commands::folder::open_image,
+            commands::folder::sort_images_by_date
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

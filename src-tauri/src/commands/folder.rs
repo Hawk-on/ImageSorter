@@ -2,7 +2,7 @@
 
 use crate::services::{hashing, scanner, thumbnail};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -46,9 +46,9 @@ pub struct DuplicateResult {
 }
 
 /// Henter cache-mappe for thumbnails
-/// Bruker /tmp/ for å unngå tilgangsproblemer med skjulte mapper
+/// Bruker systemets midlertidige mappe for OS-agnostisk støtte (Windows/Linux/macOS)
 fn get_thumbnail_cache_dir() -> PathBuf {
-    PathBuf::from("/tmp/imagesorter-thumbnails")
+    std::env::temp_dir().join("imagesorter-thumbnails")
 }
 
 /// Skanner en mappe og returnerer informasjon om bildene som ble funnet
@@ -192,7 +192,149 @@ pub async fn find_duplicates(paths: Vec<String>, threshold: u32) -> Result<Dupli
     Ok(DuplicateResult {
         groups: duplicate_groups,
         total_duplicates,
-        processed,
+        processed: hashed_images.len(),
         errors,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortResult {
+    pub processed: usize,
+    pub success: usize,
+    pub errors: usize,
+    pub error_messages: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortOptions {
+    pub use_day_folder: bool,
+    pub use_month_names: bool,
+}
+
+/// Sorterer bilder basert på dato til en målsti (År/Måned)
+#[tauri::command]
+pub async fn sort_images_by_date(
+    paths: Vec<String>,
+    method: String, // "copy" eller "move"
+    target_dir: String,
+    options: Option<SortOptions>,
+) -> Result<SortResult, String> {
+    use crate::services::metadata;
+    use chrono::Datelike;
+    use std::fs;
+
+    let target_path = Path::new(&target_dir);
+    if !target_path.exists() {
+        return Err(format!("Målmappen finnes ikke: {}", target_dir));
+    }
+
+    let opts = options.unwrap_or(SortOptions {
+        use_day_folder: false,
+        use_month_names: false,
+    });
+    
+    let month_names = [
+        "Januar", "Februar", "Mars", "April", "Mai", "Juni",
+        "Juli", "August", "September", "Oktober", "November", "Desember"
+    ];
+
+    let mut success_count = 0;
+    let mut error_messages = Vec::new();
+
+    for path_str in &paths {
+        let source_path = Path::new(path_str);
+        
+        // Hopp over hvis filen ikke finnes
+        if !source_path.exists() {
+             error_messages.push(format!("Fil finnes ikke: {}", path_str));
+             continue;
+        }
+
+        // Lese dato
+        let date = match metadata::read_creation_date(source_path) {
+            Some(d) => d,
+            None => {
+                error_messages.push(format!("Kunne ikke lese dato for: {}", path_str));
+                continue;
+            }
+        };
+
+        // Bygg målsti: target/YYYY/[MM - Navn]/[DD]/filnavn.ext
+        let year = date.year();
+        let month = date.month();
+        let day = date.day();
+
+        let month_folder = if opts.use_month_names {
+            format!("{:02} - {}", month, month_names[(month - 1) as usize])
+        } else {
+            format!("{:02}", month)
+        };
+
+        let mut dest_dir = target_path.join(format!("{}", year)).join(month_folder);
+        
+        if opts.use_day_folder {
+            dest_dir = dest_dir.join(format!("{:02}", day));
+        }
+
+        if let Err(e) = fs::create_dir_all(&dest_dir) {
+             error_messages.push(format!("Kunne ikke opprette mappe {:?}: {}", dest_dir, e));
+             continue;
+        }
+
+        let filename = source_path.file_name().unwrap_or_default();
+        let mut dest_path = dest_dir.join(filename);
+
+        // Håndter filnavn-kollisjoner (legg til _1, _2 osv)
+        let mut counter = 1;
+        let original_stem = source_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let extension = source_path
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        while dest_path.exists() {
+            // Hvis destinasjon er samme fil som kilde (allerede sortert?), hopp over
+            if let Ok(src_canon) = fs::canonicalize(source_path) {
+                if let Ok(dest_canon) = fs::canonicalize(&dest_path) {
+                    if src_canon == dest_canon {
+                        break;
+                    }
+                }
+            }
+
+            let new_filename = if extension.is_empty() {
+                format!("{}_{}", original_stem, counter)
+            } else {
+                format!("{}_{}.{}", original_stem, counter, extension)
+            };
+            dest_path = dest_dir.join(new_filename);
+            counter += 1;
+        }
+
+        // Utfør operasjon
+        let result = if method == "move" {
+            fs::rename(source_path, &dest_path)
+        } else {
+            fs::copy(source_path, &dest_path).map(|_| ())
+        };
+
+        match result {
+            Ok(_) => success_count += 1,
+            Err(e) => error_messages.push(format!("Feil ved {:?} av {:?}: {}", method, source_path, e)),
+        }
+    }
+
+    Ok(SortResult {
+        processed: paths.len(),
+        success: success_count,
+        errors: error_messages.len(),
+        error_messages,
     })
 }

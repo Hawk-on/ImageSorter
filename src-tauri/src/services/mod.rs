@@ -3,3 +3,4 @@
 pub mod hashing;
 pub mod scanner;
 pub mod thumbnail;
+pub mod metadata;

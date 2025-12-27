@@ -25,6 +25,13 @@ interface DuplicateResult {
     errors: number;
 }
 
+interface SortResult {
+    processed: number;
+    success: number;
+    errors: number;
+    errorMessages: string[];
+}
+
 // Declare the global Tauri object for dialog access
 declare global {
     interface Window {
@@ -178,6 +185,115 @@ export function setupApp() {
         }
     }
 
+    function createSortDialog(): Promise<{ confirmed: boolean; useDayFolder: boolean; useMonthNames: boolean } | null> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.className = "modal-overlay";
+            overlay.innerHTML = `
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>Sorteringsvalg</h3>
+                    </div>
+                    <div class="modal-content">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="sort-day-folder">
+                                Opprett mappe for hver dag (År/Måned/Dag)
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="sort-month-names" checked>
+                                Bruk månedsnavn (01 - Januar)
+                            </label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="modal-cancel">Avbryt</button>
+                        <button class="btn btn-primary" id="modal-confirm">Start Sortering (Kopier)</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+
+            // Animate in
+            requestAnimationFrame(() => overlay.classList.add("open"));
+
+            const close = () => {
+                overlay.classList.remove("open");
+                setTimeout(() => overlay.remove(), 300);
+            };
+
+            document.getElementById("modal-cancel")?.addEventListener("click", () => {
+                close();
+                resolve(null);
+            });
+
+            document.getElementById("modal-confirm")?.addEventListener("click", () => {
+                const useDayFolder = (document.getElementById("sort-day-folder") as HTMLInputElement).checked;
+                const useMonthNames = (document.getElementById("sort-month-names") as HTMLInputElement).checked;
+                close();
+                resolve({ confirmed: true, useDayFolder, useMonthNames });
+            });
+        });
+    }
+
+    async function sortImages() {
+        if (currentImages.length === 0) {
+            updateStatus("Ingen bilder å sortere");
+            return;
+        }
+
+        try {
+            // 1. Velg målmappe
+            const targetDir = await window.__TAURI__.dialog.open({
+                directory: true,
+                multiple: false,
+                title: "Velg målmappe for sortering",
+            });
+
+            if (!targetDir) return;
+
+            const targetPath = Array.isArray(targetDir) ? targetDir[0] : targetDir;
+
+            // 2. Vis opsjoner dialog
+            const options = await createSortDialog();
+            if (!options || !options.confirmed) return;
+
+            updateStatus("Sorterer bilder (Kopierer)...");
+            const btn = document.getElementById("sort-images");
+            btn?.classList.add("loading");
+
+            // 3. Utfør sortering med opsjoner
+            const paths = currentImages.map((img) => img.path);
+            const result = await invoke<SortResult>("sort_images_by_date", {
+                paths,
+                method: "copy",
+                targetDir: targetPath,
+                options: {
+                    useDayFolder: options.useDayFolder,
+                    useMonthNames: options.useMonthNames
+                }
+            });
+
+            // 4. Vis resultat
+            let message = `Sortering ferdig: ${result.success} kopiert, ${result.errors} feil.`;
+            if (result.errors > 0) {
+                console.warn("Feil under sortering:", result.errorMessages);
+                message += " Sjekk konsoll for detaljer.";
+            }
+            updateStatus(message);
+            alert(message);
+
+        } catch (error) {
+            console.error("Feil ved sortering:", error);
+            updateStatus(`Feil ved sortering: ${error}`);
+        } finally {
+            document.getElementById("sort-images")?.classList.remove("loading");
+        }
+    }
+
     function initGallery() {
         const app = document.getElementById("app");
         if (!app) return;
@@ -225,7 +341,9 @@ export function setupApp() {
         }
 
         // Event listeners
+        // Event listeners
         document.getElementById("find-duplicates")?.addEventListener("click", findDuplicates);
+        document.getElementById("sort-images")?.addEventListener("click", sortImages);
         document.getElementById("select-all")?.addEventListener("click", toggleSelectAll);
     }
 
@@ -234,6 +352,7 @@ export function setupApp() {
       <h2>📷 Bilder (${Math.min(visibleCount, currentImages.length)}/${currentImages.length})</h2>
       <div class="gallery-controls">
         <button class="btn btn-accent" id="find-duplicates">🔍 Finn duplikater</button>
+        <button class="btn btn-primary" id="sort-images">📂 Sorter</button>
         <button class="btn btn-secondary" id="select-all">Velg alle</button>
       </div>
     `;
@@ -274,7 +393,9 @@ export function setupApp() {
         if (loadMoreContainer) updateLoadMoreButton(loadMoreContainer);
 
         // Re-attach event listeners
+        // Re-attach event listeners
         document.getElementById("find-duplicates")?.addEventListener("click", findDuplicates);
+        document.getElementById("sort-images")?.addEventListener("click", sortImages);
         document.getElementById("select-all")?.addEventListener("click", toggleSelectAll);
     }
 
