@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // Types
 interface ImageInfo {
@@ -71,10 +72,27 @@ let spacer: HTMLDivElement | null = null;
 let scrollContainer: HTMLDivElement | null = null;
 
 export function setupApp() {
+    const toolbar = document.getElementById("toolbar-container");
+    const changeFolderBtn = document.getElementById("change-folder-btn");
     const selectFolderBtn = document.getElementById("select-folder");
-    const changeFolderBtn = document.getElementById("change-folder");
-    const statusText = document.getElementById("status-text");
     const dropZone = document.getElementById("drop-zone");
+    const statusText = document.getElementById("status-text");
+
+    // Helper to toggle views
+    const toggleView = (mode: 'import' | 'gallery') => {
+        if (!dropZone || !toolbar) return;
+
+        if (mode === 'import') {
+            dropZone.style.display = 'flex';
+            toolbar.classList.add('hidden');
+            document.getElementById("gallery-section")?.remove();
+            document.getElementById("duplicate-section")?.remove();
+            currentImages = [];
+        } else {
+            dropZone.style.display = 'none';
+            toolbar.classList.remove('hidden');
+        }
+    };
 
     selectFolderBtn?.addEventListener("click", async () => {
         try {
@@ -86,13 +104,24 @@ export function setupApp() {
 
             if (selected) {
                 const path = Array.isArray(selected) ? selected[0] : selected;
+                // Vis path i toolbar
+                const pathDisplay = document.getElementById("folder-path-display");
+                if (pathDisplay) pathDisplay.textContent = path;
+
+                toggleView('gallery');
                 updateStatus("Skanner mappe...");
                 await scanFolder(path);
             }
         } catch (error) {
             console.error("Feil ved valg av mappe:", error);
             updateStatus(`Feil ved valg av mappe: ${error}`);
+            toggleView('import');
         }
+    });
+
+    changeFolderBtn?.addEventListener("click", () => {
+        toggleView('import');
+        updateStatus("Velg en mappe for å starte");
     });
 
     dropZone?.addEventListener("dragover", (e) => {
@@ -110,25 +139,7 @@ export function setupApp() {
         updateStatus("Dra-og-slipp støttes snart");
     });
 
-    // Bytt mappe - utvid drop-zone igjen
-    changeFolderBtn?.addEventListener("click", async () => {
-        try {
-            const selected = await window.__TAURI__.dialog.open({
-                directory: true,
-                multiple: false,
-                title: "Velg mappe med bilder",
-            });
 
-            if (selected) {
-                const path = Array.isArray(selected) ? selected[0] : selected;
-                updateStatus("Skanner mappe...");
-                await scanFolder(path);
-            }
-        } catch (error) {
-            console.error("Feil ved valg av mappe:", error);
-            updateStatus(`Feil ved valg av mappe: ${error}`);
-        }
-    });
 
     function updateStatus(message: string) {
         if (statusText) {
@@ -178,10 +189,19 @@ export function setupApp() {
             updateStatus(`Analyserer ${currentImages.length} bilder...`);
 
             const paths = currentImages.map((img) => img.path);
+
+            let processedCount = 0;
+            const unlisten = await listen("progress", () => {
+                processedCount++;
+                updateStatus(`Analyserer ${processedCount}/${paths.length} bilder...`);
+            });
+
             const result = await invoke<DuplicateResult>("find_duplicates", {
                 paths,
                 threshold: DUPLICATE_THRESHOLD,
             });
+
+            unlisten();
 
             if (result.totalDuplicates === 0) {
                 updateStatus(`Ingen duplikater funnet (${result.processed} bilder)`);

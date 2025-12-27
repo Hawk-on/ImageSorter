@@ -3,10 +3,15 @@ import "./styles/main.css";
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="container">
-    <header class="header">
+    <header class="header" id="main-header">
       <h1>🛡️ Heimdall Sort</h1>
       <p class="subtitle">Sorter bilder og finn duplikater</p>
     </header>
+
+    <div id="toolbar-container" class="toolbar hidden">
+        <button class="btn btn-secondary btn-sm" id="change-folder-btn">📁 Bytt mappe</button>
+        <span id="folder-path-display" class="folder-path"></span>
+    </div>
 
     <main class="main">
       <section class="drop-zone" id="drop-zone">
@@ -16,9 +21,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <p class="drop-hint">eller</p>
           <button class="btn btn-primary" id="select-folder">Velg mappe</button>
         </div>
-        <button class="btn btn-secondary collapse-btn" id="change-folder" style="display: none;">
-          📁 Bytt mappe
-        </button>
       </section>
 
       <section class="status-panel" id="status-panel">

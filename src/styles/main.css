@@ -175,6 +175,33 @@
   opacity: 0.8;
 }
 
+/* Toolbar (Initially hidden) */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-bg-secondary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-lg);
+  border: 1px solid var(--color-border);
+  animation: fadeUp 0.3s ease-out;
+}
+
+.toolbar.hidden {
+  display: none !important;
+}
+
+.folder-path {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
 /* Drop zone - Dragon Scroll Style */
 .drop-zone {
   flex: 1;
@@ -610,38 +637,127 @@
   box-shadow: var(--shadow-lg), 0 0 20px rgba(16, 185, 129, 0.3);
 }
 
-/* Duplicate Section */
+/* Duplicate Section - Card Layout */
 .duplicate-section {
   margin-top: var(--spacing-xl);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-xl);
-  padding: var(--spacing-lg);
-  border: 2px solid var(--color-accent-primary);
+  animation: fadeUp 0.4s ease-out;
 }
 
-.duplicate-group {
-  margin-bottom: var(--spacing-xl);
-  padding-bottom: var(--spacing-lg);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.duplicate-group:last-child {
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: none;
-}
-
-.duplicate-group-header {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--spacing-md);
+.duplicate-header-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
 }
 
 .duplicate-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+.duplicate-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-lg);
+  transition: all 0.3s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+.duplicate-card.resolved {
+  transform: scale(0.95);
+  opacity: 0;
+  margin-top: -100px;
+  /* Collapse effect */
+  pointer-events: none;
+}
+
+.card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--spacing-sm);
+}
+
+.badge {
+  background: var(--color-bg-tertiary);
+  color: var(--color-accent-primary);
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  border: 1px solid var(--color-accent-primary);
+}
+
+.comparison-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--spacing-md);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.comparison-item {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.comparison-item.deleted {
+  filter: grayscale(1);
+}
+
+.img-preview {
+  width: 100%;
+  aspect-ratio: 16/10;
+  background: #000;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--spacing-sm);
+  overflow: hidden;
+  position: relative;
+  /* img loaded via background-image or img tag inside? async loader uses background usually or img tag */
+}
+
+/* Fix for async loader */
+.img-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.img-meta {
+  margin-bottom: var(--spacing-md);
+}
+
+.filename {
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.size-tag {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.btn-block {
+  width: 100%;
+  margin-bottom: var(--spacing-xs);
 }
 
 /* Original vs Duplicate markers */

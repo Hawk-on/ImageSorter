@@ -45,16 +45,14 @@ pub fn compute_exact_hash(path: &Path) -> Result<String, Box<dyn std::error::Err
 
 /// Laster et bilde fra fil og skalerer ned for raskere hashing
 pub fn load_image(path: &Path) -> Result<DynamicImage, Box<dyn std::error::Error>> {
-    let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    
-    let img = image::load_from_memory(&buffer)?;
+    // Bruk image::open direkte for å unngå å lese hele filen til en buffer først
+    let img = image::open(path)?;
     
     // Skaler ned store bilder for raskere prosessering
+    // Bruk Nearest filter for maksimal hastighet. Det er godt nok for hashing.
     let (width, height) = img.dimensions();
     if width > 512 || height > 512 {
-        Ok(img.thumbnail(512, 512))
+        Ok(img.resize(512, 512, image::imageops::FilterType::Nearest))
     } else {
         Ok(img)
     }

@@ -99,7 +99,8 @@ pub async fn open_image(path: String) -> Result<(), String> {
 /// Finner duplikater blant gitte bildestier ved hjelp av perceptuell hashing
 /// Optimalisert for store bildesamlinger med parallell prosessering
 #[tauri::command]
-pub async fn find_duplicates(paths: Vec<String>, threshold: u32) -> Result<DuplicateResult, String> {
+pub async fn find_duplicates(app: tauri::AppHandle, paths: Vec<String>, threshold: u32) -> Result<DuplicateResult, String> {
+    use tauri::Emitter; // Ensure Emitter trait is in scope
     let error_count = Mutex::new(0usize);
     
     // Last inn cache (trådsikker for parallell tilgang)
@@ -131,6 +132,10 @@ pub async fn find_duplicates(paths: Vec<String>, threshold: u32) -> Result<Dupli
             {
                 let read_guard = cache.read().unwrap();
                 if let Some(cached_hash_str) = read_guard.get(path_str, mtime) {
+                    let _ = app.emit("progress", serde_json::json!({
+                        "current": 1, // Rayon does not easily support global counter without mutex, simpler to just send "tick"
+                        "total": 0 // Frontend knows total
+                    }));
                     return Some(ImageWithHash {
                         info: ImageInfo {
                             path: path_str.clone(),
@@ -154,6 +159,8 @@ pub async fn find_duplicates(paths: Vec<String>, threshold: u32) -> Result<Dupli
                                 let mut write_guard = cache.write().unwrap();
                                 write_guard.insert(path_str.clone(), mtime, hash_str.clone());
                             }
+
+                            let _ = app.emit("progress", serde_json::json!({ "tick": true }));
 
                             Some(ImageWithHash {
                                 info: ImageInfo {
