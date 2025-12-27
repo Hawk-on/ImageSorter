@@ -275,7 +275,36 @@ body {
   border-color: var(--color-accent-primary);
 }
 
-/* Gallery Grid */
+/* Virtual Scroll */
+.virtual-scroll-container {
+  position: relative;
+  overflow-y: auto;
+  height: calc(100vh - 200px); /* Juster etter behov, f.eks. header høyde */
+  width: 100%;
+}
+
+.virtual-scroll-spacer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.virtual-scroll-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm);
+  will-change: transform; /* Optimalisering */
+}
+
+/* Gallery Grid (Legacy - kan fjernes når alt er portet, men behold for nå) */
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

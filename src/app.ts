@@ -48,13 +48,27 @@ declare global {
 }
 
 // Configuration
-const IMAGES_PER_PAGE = 50;
+
 const DUPLICATE_THRESHOLD = 5; // For 8x8 hash (64 bits), 5 er god balanse
 
 // State
 let currentImages: ImageInfo[] = [];
-let visibleCount = IMAGES_PER_PAGE;
-let galleryElement: HTMLDivElement | null = null;
+// Virutell scroll state
+let virtualState = {
+    rowHeight: 200, // Estimat, oppdateres dynamisk
+    containerHeight: 0,
+    scrollTop: 0,
+    cols: 4,
+    totalRows: 0,
+    startIndex: 0,
+    endIndex: 0
+};
+// Cache for valgte bilder (siden DOM elementer slettes)
+let selectedPaths: Set<string> = new Set();
+
+let scrollContent: HTMLDivElement | null = null;
+let spacer: HTMLDivElement | null = null;
+let scrollContainer: HTMLDivElement | null = null;
 
 export function setupApp() {
     const selectFolderBtn = document.getElementById("select-folder");
@@ -128,8 +142,12 @@ export function setupApp() {
             const result = await invoke<ScanResult>("scan_folder", { path });
 
             currentImages = result.images;
-            visibleCount = IMAGES_PER_PAGE;
-            galleryElement = null;
+            // Nullstill state
+            selectedPaths.clear();
+
+            scrollContent = null;
+            spacer = null;
+            scrollContainer = null;
             const sizeMB = (result.totalSizeBytes / 1024 / 1024).toFixed(2);
             updateStatus(`Fant ${result.imageCount} bilder (${sizeMB} MB)`);
 
@@ -378,12 +396,7 @@ export function setupApp() {
         }
     }
 
-    function getSelectedImages(): ImageInfo[] {
-        if (!galleryElement) return [];
-        const checkboxes = galleryElement.querySelectorAll(".gallery-checkbox:checked") as NodeListOf<HTMLInputElement>;
-        const paths = Array.from(checkboxes).map(cb => cb.dataset.path);
-        return currentImages.filter(img => paths.includes(img.path));
-    }
+
 
     function initGallery() {
         const app = document.getElementById("app");
@@ -405,43 +418,128 @@ export function setupApp() {
         galleryHeader.id = "gallery-header";
         updateGalleryHeader(galleryHeader);
 
-        // Gallery grid
-        galleryElement = document.createElement("div");
-        galleryElement.id = "gallery-grid";
-        galleryElement.className = "gallery-grid";
+        // Virtual Scroll Container
+        scrollContainer = document.createElement("div");
+        scrollContainer.className = "virtual-scroll-container";
 
-        // Add initial images
-        const visibleImages = currentImages.slice(0, visibleCount);
-        visibleImages.forEach((img, index) => {
-            galleryElement!.appendChild(createGalleryItem(img, index));
-        });
+        // Spacer (gir scrollbar riktig høyde)
+        spacer = document.createElement("div");
+        spacer.className = "virtual-scroll-spacer";
+        scrollContainer.appendChild(spacer);
+
+        // Content (holder de synlige elementene)
+        scrollContent = document.createElement("div");
+        scrollContent.className = "virtual-scroll-content";
+        scrollContainer.appendChild(scrollContent);
 
         gallerySection.appendChild(galleryHeader);
-        gallerySection.appendChild(galleryElement);
-
-        // Load more container
-        const loadMoreContainer = document.createElement("div");
-        loadMoreContainer.className = "load-more-container";
-        loadMoreContainer.id = "load-more-container";
-        updateLoadMoreButton(loadMoreContainer);
-        gallerySection.appendChild(loadMoreContainer);
+        gallerySection.appendChild(scrollContainer);
 
         const container = app.querySelector(".container");
         if (container) {
             container.appendChild(gallerySection);
         }
 
-        // Event listeners
+        // Attach listeners
         document.getElementById("find-duplicates")?.addEventListener("click", findDuplicates);
         document.getElementById("sort-images")?.addEventListener("click", sortImages);
         document.getElementById("select-all")?.addEventListener("click", toggleSelectAll);
         document.getElementById("delete-selected")?.addEventListener("click", deleteSelected);
         document.getElementById("move-selected")?.addEventListener("click", moveSelected);
+
+        // Init virtual scroll
+        setupVirtualScroll();
+    }
+
+    function setupVirtualScroll() {
+        if (!scrollContainer || !spacer || !scrollContent) return;
+
+        // 1. Beregn grid-dimensjoner
+        const calculateMetrics = () => {
+            if (!scrollContainer) return;
+            const containerWidth = scrollContainer.clientWidth;
+            // Min bredde 160px + gap 16px (var(--spacing-md))
+            const minColWidth = 160 + 16;
+            virtualState.cols = Math.max(1, Math.floor((containerWidth - 32) / minColWidth)); // 32px padding
+            virtualState.totalRows = Math.ceil(currentImages.length / virtualState.cols);
+
+            // Oppdater høyde på spacer
+            const totalHeight = virtualState.totalRows * virtualState.rowHeight;
+            if (spacer) spacer.style.height = `${totalHeight}px`;
+
+            virtualState.containerHeight = scrollContainer.clientHeight;
+        };
+
+        // Resize Observer
+        const resizeObserver = new ResizeObserver(() => {
+            calculateMetrics();
+            renderVirtualItems();
+        });
+        resizeObserver.observe(scrollContainer);
+
+        // Scroll listener
+        scrollContainer.addEventListener("scroll", (e) => {
+            requestAnimationFrame(() => {
+                virtualState.scrollTop = (e.target as HTMLElement).scrollTop;
+                renderVirtualItems();
+            });
+        });
+
+        // Initial calculering
+        calculateMetrics();
+        renderVirtualItems();
+    }
+
+    function renderVirtualItems() {
+        if (!scrollContent || !currentImages.length) return;
+
+        // Beregn synlige rader
+        const startRow = Math.floor(virtualState.scrollTop / virtualState.rowHeight);
+        const visibleRows = Math.ceil(virtualState.containerHeight / virtualState.rowHeight);
+
+        // Legg til buffer (1 rad over/under)
+        const buffer = 2;
+        const startRowWithBuffer = Math.max(0, startRow - buffer);
+        let endRowWithBuffer = startRow + visibleRows + buffer;
+        endRowWithBuffer = Math.min(endRowWithBuffer, virtualState.totalRows);
+
+        const newStartIndex = startRowWithBuffer * virtualState.cols;
+        const newEndIndex = Math.min(endRowWithBuffer * virtualState.cols, currentImages.length);
+
+        // Hvis ingen endring i indeks, ikke gjør noe (unngå unødvendig DOM-manipulasjon)
+        if (newStartIndex === virtualState.startIndex && newEndIndex === virtualState.endIndex) {
+            return;
+        }
+
+        virtualState.startIndex = newStartIndex;
+        virtualState.endIndex = newEndIndex;
+
+        // Posisjoner content-diven
+        const offsetY = startRowWithBuffer * virtualState.rowHeight;
+        scrollContent.style.transform = `translateY(${offsetY}px)`;
+
+        // Tøm og fyll på nytt (enkel tilnærming, kan optimaliseres med gjenbruk)
+        scrollContent.innerHTML = "";
+
+        const visibleImages = currentImages.slice(newStartIndex, newEndIndex);
+
+        const fragment = document.createDocumentFragment();
+        visibleImages.forEach((img, i) => {
+            const actualIndex = newStartIndex + i;
+            fragment.appendChild(createGalleryItem(img, actualIndex));
+        });
+        scrollContent.appendChild(fragment);
+
+        // Oppdater telling i header
+        const headerTitle = document.querySelector("#gallery-header h2");
+        if (headerTitle) {
+            headerTitle.textContent = `📷 Bilder (${currentImages.length} totalt)`;
+        }
     }
 
     function updateGalleryHeader(header: HTMLElement) {
         header.innerHTML = `
-      <h2>📷 Bilder (${Math.min(visibleCount, currentImages.length)}/${currentImages.length})</h2>
+      <h2>📷 Bilder (${currentImages.length})</h2>
       <div class="gallery-controls">
         <button class="btn btn-accent" id="find-duplicates">🔍 Finn duplikater</button>
         <button class="btn btn-primary" id="sort-images">📂 Sorter Alt</button>
@@ -453,55 +551,17 @@ export function setupApp() {
     `;
     }
 
-    function updateLoadMoreButton(container: HTMLElement) {
-        const remaining = currentImages.length - visibleCount;
-        if (remaining > 0) {
-            container.innerHTML = `
-        <button class="btn btn-secondary" id="load-more">
-          Last inn flere (${remaining} gjenstår)
-        </button>
-      `;
-            document.getElementById("load-more")?.addEventListener("click", loadMore);
-        } else {
-            container.innerHTML = "";
-        }
-    }
-
-    function loadMore() {
-        if (!galleryElement) return;
-
-        const startIndex = visibleCount;
-        visibleCount = Math.min(visibleCount + IMAGES_PER_PAGE, currentImages.length);
-        const endIndex = visibleCount;
-
-        // Add only new images (no flicker)
-        const newImages = currentImages.slice(startIndex, endIndex);
-        newImages.forEach((img, i) => {
-            galleryElement!.appendChild(createGalleryItem(img, startIndex + i));
-        });
-
-        // Update header and load more button
-        const header = document.getElementById("gallery-header");
-        if (header) updateGalleryHeader(header);
-
-        const loadMoreContainer = document.getElementById("load-more-container");
-        if (loadMoreContainer) updateLoadMoreButton(loadMoreContainer);
-
-        // Re-attach event listeners
-        // Re-attach event listeners
-        document.getElementById("find-duplicates")?.addEventListener("click", findDuplicates);
-        document.getElementById("sort-images")?.addEventListener("click", sortImages);
-        document.getElementById("select-all")?.addEventListener("click", toggleSelectAll);
-    }
-
     function toggleSelectAll() {
-        if (!galleryElement) return;
-        const checkboxes = galleryElement.querySelectorAll(".gallery-checkbox") as NodeListOf<HTMLInputElement>;
-        const allChecked = Array.from(checkboxes).every((cb) => cb.checked);
-        checkboxes.forEach((cb) => {
-            cb.checked = !allChecked;
-            cb.closest(".gallery-item")?.classList.toggle("selected", cb.checked);
-        });
+        if (selectedPaths.size === currentImages.length) {
+            selectedPaths.clear();
+        } else {
+            currentImages.forEach(img => selectedPaths.add(img.path));
+        }
+        renderVirtualItems(); // Re-render for å vise checkboxes
+    }
+
+    function getSelectedImages(): ImageInfo[] {
+        return currentImages.filter(img => selectedPaths.has(img.path));
     }
 
     function displayDuplicates(groups: DuplicateGroup[]) {
@@ -618,13 +678,23 @@ export function setupApp() {
 
         const sizeKB = (img.sizeBytes / 1024).toFixed(1);
 
-        // Start med placeholder, last thumbnail asynkront
+        // Lagre referanse til checkbox for å slippe querySelector
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "gallery-checkbox";
+        checkbox.dataset.path = img.path;
+
+        // Sjekk om valgt i persisted state
+        if (selectedPaths.has(img.path)) {
+            checkbox.checked = true;
+            item.classList.add("selected");
+        }
+
         item.innerHTML = `
       <div class="gallery-item-image">
         <div class="thumbnail-placeholder">⏳</div>
         <img src="" alt="${img.filename}" loading="lazy" decoding="async" style="display: none;" />
         <div class="gallery-item-overlay">
-          <input type="checkbox" class="gallery-checkbox" data-path="${img.path}" />
         </div>
       </div>
       <div class="gallery-item-info">
@@ -632,18 +702,24 @@ export function setupApp() {
         <span class="gallery-item-size">${sizeKB} KB</span>
       </div>
     `;
+        item.querySelector(".gallery-item-overlay")?.appendChild(checkbox);
 
         // Last thumbnail asynkront
         loadThumbnail(item, img.path);
 
         // Enkeltklikk = velg/avvelg
         item.addEventListener("click", (e) => {
-            if ((e.target as HTMLElement).tagName !== "INPUT") {
-                const checkbox = item.querySelector(".gallery-checkbox") as HTMLInputElement;
-                if (checkbox) {
-                    checkbox.checked = !checkbox.checked;
-                    item.classList.toggle("selected", checkbox.checked);
-                }
+            // Hvis klikk ikke var på checkbox (checkbox håndterer seg selv), toggle manuelt
+            if ((e.target as HTMLElement) !== checkbox) {
+                checkbox.checked = !checkbox.checked;
+            }
+            // Oppdater state
+            if (checkbox.checked) {
+                selectedPaths.add(img.path);
+                item.classList.add("selected");
+            } else {
+                selectedPaths.delete(img.path);
+                item.classList.remove("selected");
             }
         });
 
