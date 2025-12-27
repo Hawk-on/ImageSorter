@@ -45,6 +45,7 @@ open = "5"
 # Metadata / EXIF
 kamadak-exif = "0.5"
 chrono = "0.4"
+trash = "5.2.5"
 
 [profile.release]
 strip = true

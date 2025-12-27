@@ -25,7 +25,7 @@ interface DuplicateResult {
     errors: number;
 }
 
-interface SortResult {
+interface OperationResult {
     processed: number;
     success: number;
     errors: number;
@@ -267,7 +267,7 @@ export function setupApp() {
 
             // 3. Utfør sortering med opsjoner
             const paths = currentImages.map((img) => img.path);
-            const result = await invoke<SortResult>("sort_images_by_date", {
+            const result = await invoke<OperationResult>("sort_images_by_date", {
                 paths,
                 method: "copy",
                 targetDir: targetPath,
@@ -292,6 +292,97 @@ export function setupApp() {
         } finally {
             document.getElementById("sort-images")?.classList.remove("loading");
         }
+    }
+
+    async function deleteSelected() {
+        const selected = getSelectedImages();
+        if (selected.length === 0) {
+            alert("Ingen bilder valgt");
+            return;
+        }
+
+        if (!confirm(`Er du sikker på at du vil slette ${selected.length} bilder? De flyttes til papirkurven hvis mulig.`)) {
+            return;
+        }
+
+        const btn = document.getElementById("delete-selected");
+        try {
+            btn?.classList.add("loading");
+            const paths = selected.map(img => img.path);
+            const result = await invoke<OperationResult>("delete_images", { paths });
+
+            let msg = `Slettet ${result.success} bilder.`;
+            if (result.errors > 0) msg += ` ${result.errors} feil (se logg).`;
+
+            updateStatus(msg);
+            alert(msg);
+
+            // Fjern slettede bilder fra UI
+            if (result.success > 0) {
+                // Vi antar her at suksess betyr at bildene er borte.
+                // For en mer robust løsning burde backend returnere liste over slettede stier.
+                // Men for MVP reloader vi bare mappen eller fjerner de valgte optimistisk.
+                // Optimistisk fjerning:
+                currentImages = currentImages.filter(img => !paths.includes(img.path));
+                initGallery();
+            }
+
+        } catch (error) {
+            console.error("Feil ved sletting:", error);
+            alert(`Feil ved sletting: ${error}`);
+        } finally {
+            btn?.classList.remove("loading");
+        }
+    }
+
+    async function moveSelected() {
+        const selected = getSelectedImages();
+        if (selected.length === 0) {
+            alert("Ingen bilder valgt");
+            return;
+        }
+
+        try {
+            const targetDir = await window.__TAURI__.dialog.open({
+                directory: true,
+                multiple: false,
+                title: "Velg målmappe for flytting",
+            });
+
+            if (!targetDir) return;
+            const targetPath = Array.isArray(targetDir) ? targetDir[0] : targetDir;
+
+            const btn = document.getElementById("move-selected");
+            btn?.classList.add("loading");
+            updateStatus(`Flytter ${selected.length} bilder...`);
+
+            const paths = selected.map(img => img.path);
+            const result = await invoke<OperationResult>("move_images", { paths, targetDir: targetPath });
+
+            let msg = `Flyttet ${result.success} bilder.`;
+            if (result.errors > 0) msg += ` ${result.errors} feil.`;
+
+            updateStatus(msg);
+            alert(msg);
+
+            if (result.success > 0) {
+                currentImages = currentImages.filter(img => !paths.includes(img.path));
+                initGallery();
+            }
+
+        } catch (error) {
+            console.error("Feil ved flytting:", error);
+            alert(`Feil ved flytting: ${error}`);
+        } finally {
+            document.getElementById("move-selected")?.classList.remove("loading");
+        }
+    }
+
+    function getSelectedImages(): ImageInfo[] {
+        if (!galleryElement) return [];
+        const checkboxes = galleryElement.querySelectorAll(".gallery-checkbox:checked") as NodeListOf<HTMLInputElement>;
+        const paths = Array.from(checkboxes).map(cb => cb.dataset.path);
+        return currentImages.filter(img => paths.includes(img.path));
     }
 
     function initGallery() {
@@ -341,10 +432,11 @@ export function setupApp() {
         }
 
         // Event listeners
-        // Event listeners
         document.getElementById("find-duplicates")?.addEventListener("click", findDuplicates);
         document.getElementById("sort-images")?.addEventListener("click", sortImages);
         document.getElementById("select-all")?.addEventListener("click", toggleSelectAll);
+        document.getElementById("delete-selected")?.addEventListener("click", deleteSelected);
+        document.getElementById("move-selected")?.addEventListener("click", moveSelected);
     }
 
     function updateGalleryHeader(header: HTMLElement) {
@@ -352,8 +444,11 @@ export function setupApp() {
       <h2>📷 Bilder (${Math.min(visibleCount, currentImages.length)}/${currentImages.length})</h2>
       <div class="gallery-controls">
         <button class="btn btn-accent" id="find-duplicates">🔍 Finn duplikater</button>
-        <button class="btn btn-primary" id="sort-images">📂 Sorter</button>
+        <button class="btn btn-primary" id="sort-images">📂 Sorter Alt</button>
+        <div class="divider"></div>
         <button class="btn btn-secondary" id="select-all">Velg alle</button>
+        <button class="btn btn-danger" id="delete-selected">🗑️ Slett valgte</button>
+        <button class="btn btn-secondary" id="move-selected">➡️ Flytt valgte</button>
       </div>
     `;
     }
