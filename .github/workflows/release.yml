@@ -53,13 +53,24 @@ jobs:
       - name: setup binaries (ffmpeg)
         run: npm run setup
 
+      - name: Get Release Notes
+        id: release_notes
+        if: matrix.platform == 'ubuntu-22.04' # Only need to generate notes once (or on all, doesn't matter much but cleaner)
+        shell: bash
+        run: |
+          NOTES=$(node scripts/extract-changelog.mjs)
+          # Handle multiline output for GitHub Actions
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version.
-          releaseName: 'ImageSorter v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
+          tagName: v__VERSION__ 
+          releaseName: 'Heimdall Sort v__VERSION__'
+          releaseBody: ${{ steps.release_notes.outputs.notes || 'See the assets to download this version and install.' }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
